@@ -84,13 +84,19 @@ namespace UpdateMachine.Core
 
         private List<string> CheckNewFiles()
         {
-            string value;
-            using (WebClient webClient = new WebClient() { Encoding = Encoding.UTF8 })
-                value = webClient.DownloadString(Path.Combine(url, ".updatemachine", "index").Replace('\\', '/'));
+            List<string> list = new List<string>();
+
+            string value = null;
+
+            var success = TryRun(new Action(() =>
+              {
+                  using (WebClient webClient = new WebClient() { Encoding = Encoding.UTF8 })
+                      value = webClient.DownloadString(Path.Combine(url, ".updatemachine", "index").Replace('\\', '/'));
+              }), 3);
+            if (!success) return list;
 
             FileIndex index = JsonConvert.DeserializeObject<FileIndex>(value);
 
-            List<string> list = new List<string>();
             foreach (FileItem f in index.Files)
             {
                 string s = Path.Combine(Environment.CurrentDirectory, f.Name);
@@ -99,7 +105,6 @@ namespace UpdateMachine.Core
                     list.Add(f.Name);
                 }
             }
-
             return list;
         }
 
@@ -109,18 +114,11 @@ namespace UpdateMachine.Core
             {
                 list.ForEach(o =>
                 {
-                    start:
-                    try
+                    TryRun(new Action(() =>
                     {
                         Directory.CreateDirectory(Path.Combine(Environment.CurrentDirectory, ".updatemachine", o.Substring(0, o.LastIndexOf('/') <= 0 ? 0 : o.LastIndexOf('/'))));
                         webClient.DownloadFile(Path.Combine(url, o).Replace('\\', '/'), Path.Combine(Environment.CurrentDirectory, ".updatemachine", o));
-                    }
-                    catch (Exception e)
-                    {
-                        OnException?.Invoke(e);
-                        Thread.Sleep(1000);
-                        goto start;
-                    }
+                    }), 3);
                     OnProgressChanged?.Invoke(list.IndexOf(o) + 1, list.Count);
                 });
             }
@@ -133,6 +131,25 @@ namespace UpdateMachine.Core
 
             foreach (string newPath in Directory.GetFiles(@base, "*.*", SearchOption.AllDirectories))
                 File.Copy(newPath, newPath.Replace(@base, dest), true);
+        }
+
+        public bool TryRun(Action action, int count)
+        {
+            int failCounter = 0;
+        start:
+            if (failCounter++ < count)
+                try
+                {
+                    action.Invoke();
+                }
+                catch (Exception e)
+                {
+                    OnException?.Invoke(e);
+                    Thread.Sleep(1000);
+                    goto start;
+                }
+            else return false;
+            return true;
         }
 
         public class FileIndex
